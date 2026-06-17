@@ -147,8 +147,8 @@
   <!-- USE -->
   <section class="reveal">
     <h2><span class="num">02</span>How to use it</h2>
-    <p class="lead">Six subcommands. You run <code>setup</code> and <code>enroll</code> once;
-      after that it's just <code>run</code>.</p>
+    <p class="lead">Six core subcommands (plus an optional desktop launcher). You run
+      <code>setup</code> and <code>enroll</code> once; after that it's just <code>run</code>.</p>
 
     <div class="seq">
       <span class="step">setup</span><span class="arr">→</span>
@@ -176,6 +176,9 @@
       <div class="card"><button class="copy" type="button" title="Copy command" aria-label="Copy command"></button>
         <div class="c">./teams-lxd.sh <span class="sub">destroy</span></div>
         <p>Removes the running container. Your enrolled identity and login persist in <code>data/</code>, so you can rebuild and skip re-enrolling — delete <code>data/</code> too to erase it entirely.</p></div>
+      <div class="card"><button class="copy" type="button" title="Copy command" aria-label="Copy command"></button>
+        <div class="c">./teams-lxd.sh <span class="sub">install-desktop</span></div>
+        <p>Adds a <b>“Microsoft Teams (LXD)”</b> launcher to your application menu / dock, so you can start Teams with a click. (<code>uninstall-desktop</code> removes it.)</p></div>
     </div>
     <p class="note">Override the container name with <span class="kbd">TEAMS_CT=…</span> and the keyring
       passphrase with <span class="kbd">TEAMS_KEYRING_PASS=…</span>.</p>

@@ -14,6 +14,62 @@ keys are sealed inside the box.
 
 ---
 
+## Install
+
+**Requirements:** a Linux host with an X11 or Xwayland session (`$DISPLAY` set — a normal Ubuntu
+desktop session, including GNOME Wayland, works). Tested with Ubuntu 24.04 (noble) containers;
+26.04 is also a supported Intune target.
+
+**1. Install LXD and join the `lxd` group:**
+
+```bash
+sudo snap install lxd && sudo lxd init --minimal
+sudo usermod -aG lxd "$USER" && newgrp lxd
+```
+
+**2. Clone the repo:**
+
+```bash
+git clone https://github.com/fedenunez/teams-lxd.git
+cd teams-lxd
+```
+
+**3. Set a strong keyring passphrase** (protects your Intune credentials at rest — don't skip it;
+see [Security caveats](#security-caveats)). Add it to your `~/.bashrc` so it's always set:
+
+```bash
+export TEAMS_KEYRING_PASS='choose-a-strong-secret'
+```
+
+**4. Create and provision the container** (downloads Ubuntu, Edge and the Intune broker — takes a
+few minutes):
+
+```bash
+./teams-lxd.sh setup
+```
+
+**5. Enrol** — sign in with your work account in the Company Portal window that opens:
+
+```bash
+./teams-lxd.sh enroll
+```
+
+**6. Launch Teams:**
+
+```bash
+./teams-lxd.sh run
+```
+
+**7. (Optional) Add an application-menu launcher** so you can start Teams with a click:
+
+```bash
+./teams-lxd.sh install-desktop
+```
+
+See [How to use it](#how-to-use-it) below for the full command reference.
+
+---
+
 ## What it is
 
 Microsoft requires that the device touching Teams be enrolled in Intune and pass a
@@ -25,27 +81,82 @@ Ubuntu 24.04 LXD system container is the thing that gets enrolled.
 
 ## How to use it
 
-Six subcommands. You run `setup` and `enroll` once; after that it's just `run`.
+Six core subcommands (plus optional desktop-launcher helpers). You run `setup` and `enroll` once;
+after that it's just `run`.
 
 ```text
 setup  →  enroll  →  run  ↺  run … run …
 ```
 
+**One-time: create the container, map your UID, attach devices, install Edge + the Intune broker.**
+
 ```bash
-./teams-lxd.sh setup     # one-time: create the container, map your UID, attach devices, install Edge + Intune broker
-./teams-lxd.sh enroll    # interactive: open the Company Portal, sign in with your work account, finish enrolment
-./teams-lxd.sh run       # launch Teams in Edge on your desktop (audio, mic, camera and GPU wired through)
-./teams-lxd.sh shell     # drop into a root shell in the container for poking around / debugging
-./teams-lxd.sh status    # show container state and whether the identity broker service is alive
-./teams-lxd.sh destroy   # remove the container; your login persists in data/ (delete data/ to erase it entirely)
+./teams-lxd.sh setup
 ```
 
-Configuration via env vars:
+**Interactive: open the Company Portal, sign in with your work account, finish enrolment.**
 
 ```bash
-export TEAMS_CT=teams-box            # container name (default: teams-box)
-export TEAMS_KEYRING_PASS=…          # gnome-keyring unlock passphrase — SET THIS (see Security caveats)
-export TEAMS_DATA=./data             # persistent data directory (default: ./data)
+./teams-lxd.sh enroll
+```
+
+**Launch Teams in Edge on your desktop (audio, mic, camera and GPU wired through). Starts the container if it's stopped; if Teams is already open, it just brings the window to the front instead of opening a second one.**
+
+```bash
+./teams-lxd.sh run
+```
+
+**Drop into a root shell in the container for poking around / debugging.**
+
+```bash
+./teams-lxd.sh shell
+```
+
+**Show container state and whether the identity broker service is alive.**
+
+```bash
+./teams-lxd.sh status
+```
+
+**Remove the container; your login persists in `data/` (delete `data/` to erase it entirely).**
+
+```bash
+./teams-lxd.sh destroy
+```
+
+**Add a “Microsoft Teams (LXD)” launcher to your application menu / dock.**
+
+```bash
+./teams-lxd.sh install-desktop
+```
+
+After `install-desktop`, Teams shows up in your app menu like a native app — clicking it runs `run`
+(starting the container if needed). The launcher is written to
+`~/.local/share/applications/teams-lxd.desktop` with absolute paths, so don't move the repo
+afterwards (just re-run `install-desktop` if you do). To remove it:
+
+```bash
+./teams-lxd.sh uninstall-desktop
+```
+
+### Configuration via env vars
+
+**Container name (default: `teams-box`).**
+
+```bash
+export TEAMS_CT=teams-box
+```
+
+**gnome-keyring unlock passphrase — set this to a strong secret (see [Security caveats](#security-caveats)).**
+
+```bash
+export TEAMS_KEYRING_PASS=…
+```
+
+**Persistent data directory (default: `./data`).**
+
+```bash
+export TEAMS_DATA=./data
 ```
 
 ---
@@ -123,7 +234,7 @@ than by loosening permissions on the host.
 
 | Hole | Mechanism | The gotcha it avoids |
 | --- | --- | --- |
-| **display** | bind-mount `/tmp/.X11-unix` + `xhost +local:` | UID mapped 1:1 so the X cookie & socket ownership line up. |
+| **display** | bind-mount `/tmp/.X11-unix` + per-display `XAUTHORITY` cookie | UID mapped 1:1 so socket ownership lines up; a wildcard MIT cookie authenticates the container's X clients **without** weakening the host via `xhost`. |
 | **audio + mic** | bind-mount the Pulse/PipeWire sockets to `/tmp` | A proxy connects as root and PipeWire refuses it; a bind-mount keeps your credentials. Mounted under `/tmp`, not `/run/user`, so logind's tmpfs can't shadow it. |
 | **camera** | `unix-char` device with `gid=44 mode=0660` | Default node is `root:root` → "device not found". Group `video` lets `ubuntu` open it. |
 | **GPU** | `gpu` device + `ubuntu` in `render,video` | Without the groups `/dev/dri` is denied and Edge crawls on software rendering. |
@@ -148,13 +259,6 @@ than by loosening permissions on the host.
 >   inside the container; any process in the container can read it.
 > - **`$DISPLAY` is interpolated into a shell command.** Only run this from a session where you
 >   trust the value of `$DISPLAY` (i.e. your own desktop).
-
-## Prerequisites
-
-- LXD installed (`sudo snap install lxd && sudo lxd init --minimal`)
-- Current user in the `lxd` group
-- An X11 or Xwayland session on the host (`$DISPLAY` must be set)
-- Tested on Ubuntu 24.04 (noble) containers (26.04 also a supported Intune target)
 
 ---
 

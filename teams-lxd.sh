@@ -14,6 +14,8 @@
 #   ./teams-lxd.sh shell     # drop into a root shell in the container
 #   ./teams-lxd.sh status    # show container + enrollment state
 #   ./teams-lxd.sh destroy   # delete the container; data/home on host is kept
+#   ./teams-lxd.sh install-desktop    # add a "Microsoft Teams (LXD)" app menu launcher
+#   ./teams-lxd.sh uninstall-desktop  # remove that launcher
 #
 # Tested target: Ubuntu 24.04 (noble) container on an X11 or Xwayland host.
 #
@@ -49,9 +51,16 @@ prepare_xauth() {
   rm -f "$ck"; : > "$ck"
   # Rewrite the cookie's address family to FamilyWild ('ffff') so it matches the
   # container's (different) hostname when connecting over the shared X socket.
+  # Edge/xcb accept this wildcard entry.
   if ! xauth nlist "$DISPLAY" 2>/dev/null | sed -e 's/^..../ffff/' | xauth -f "$ck" nmerge - 2>/dev/null; then
     warn "could not derive an X cookie for $DISPLAY — the GUI window may not appear"
   fi
+  # Also add a FamilyLocal entry keyed to the container hostname (= "$CT"):
+  # python-xlib's stricter xauth lookup ignores the wildcard entry for a local
+  # ":0" connection, and the window-icon helper needs it to authenticate.
+  local cv
+  cv="$(xauth nlist "$DISPLAY" 2>/dev/null | awk 'NR==1{print $NF}')"
+  [ -n "$cv" ] && xauth -f "$ck" add "$CT/unix:${DISPLAY##*:}" MIT-MAGIC-COOKIE-1 "$cv" 2>/dev/null || true
 }
 
 # ----- preflight ------------------------------------------------------------
@@ -72,6 +81,24 @@ need_ct() {
   [ -n "${DISPLAY:-}" ] || die "No \$DISPLAY set. This script forwards X11; on pure Wayland start an Xwayland session or run from an X11 login."
   [ -S "/tmp/.X11-unix/X${DISPLAY##*:}" ] || warn "X socket for $DISPLAY not found at /tmp/.X11-unix — GUI may not appear."
   lxc info "$CT" >/dev/null 2>&1 || die "Container '$CT' missing or LXD unreachable. Run: ./teams-lxd.sh setup"
+}
+
+# ensure_running: start the container if it's stopped, then block until it can
+# accept commands. Polls the real readiness condition (exec succeeds) rather
+# than guessing a fixed delay. Important for the desktop launcher: clicking the
+# icon when the box is off should just start it.
+ensure_running() {
+  local st
+  st="$(lxc info "$CT" 2>/dev/null | awk -F': *' '/^Status/{print toupper($2)}')"
+  [ "$st" = "RUNNING" ] && return 0
+  log "Container '$CT' is ${st:-STOPPED} — starting..."
+  lxc start "$CT" 2>/dev/null || true
+  local i=0
+  until lxc exec "$CT" -- true 2>/dev/null; do
+    i=$((i + 1)); [ "$i" -gt 150 ] && die "Container '$CT' did not become ready."
+    sleep 0.1
+  done
+  ok "container running"
 }
 
 # ----- setup ----------------------------------------------------------------
@@ -151,7 +178,7 @@ cmd_setup() {
     apt-get install -y -qq curl gpg apt-transport-https \
         dbus-x11 gnome-keyring libsecret-1-0 policykit-1 \
         fonts-liberation libnss3 libgbm1 libasound2t64 \
-        x11-xserver-utils >/dev/null
+        x11-xserver-utils python3-xlib python3-pil >/dev/null
 
     # Microsoft signing key + repos (prod = Intune/broker, edge = browser).
     install -d -m 0755 /usr/share/keyrings
@@ -169,6 +196,13 @@ cmd_setup() {
 
   # GPU access: ubuntu must be in render+video groups or /dev/dri/* is denied.
   ctexec usermod -aG render,video ubuntu 2>/dev/null || true
+
+  # Window-icon helper: stamps _NET_WM_ICON on the Teams window so the taskbar
+  # shows our icon even if the desktop env hasn't matched the .desktop yet.
+  if [ -f "$SCRIPT_DIR/set-window-icon.py" ]; then
+    lxc file push -q "$SCRIPT_DIR/set-window-icon.py" "$CT/usr/local/bin/set-window-icon" 2>/dev/null || true
+    ctexec chmod +x /usr/local/bin/set-window-icon 2>/dev/null || true
+  fi
 
   # User session: linger keeps the user's systemd + dbus + broker alive so the
   # device-bound keys persist between launches.
@@ -209,6 +243,7 @@ cmd_enroll() {
   # Make sure the persistent home exists so enrolment data lands on the host
   # mount (and survives destroy), even if setup was run before this dir existed.
   mkdir -p "$DATA_DIR/home"
+  ensure_running
   log "Opening the Company Portal. Sign in with your work account and complete enrollment."
   prepare_xauth
   ctuser bash -c "source /usr/local/bin/session-init; \
@@ -219,22 +254,51 @@ cmd_enroll() {
   ok "When the portal shows the device as compliant, run:  ./teams-lxd.sh run"
 }
 
+# raise_if_open: single-instance guard. If a Teams window (WM class 'teams-lxd')
+# is already mapped, activate it and signal the caller to stop — so clicking the
+# launcher twice just brings the existing window forward instead of opening a
+# second one. Best-effort: needs xdotool on the host; otherwise we fall through.
+raise_if_open() {
+  command -v xdotool >/dev/null 2>&1 || return 1
+  local wid
+  wid="$(xdotool search --class teams-lxd 2>/dev/null | head -1)"
+  [ -n "$wid" ] || return 1
+  xdotool windowactivate "$wid" >/dev/null 2>&1 || xdotool windowraise "$wid" >/dev/null 2>&1 || true
+  return 0
+}
+
 # ----- run ------------------------------------------------------------------
 cmd_run() {
   need_ct
+  if raise_if_open; then
+    ok "Teams is already open — brought it to the front."
+    return 0
+  fi
+  ensure_running
   log "Launching Teams in Edge..."
   prepare_xauth
+  # Push the current icon in so the in-container helper can stamp the window.
+  local icon; icon="$(pick_icon)"
+  [ -f "$icon" ] && lxc file push -q "$icon" "$CT/usr/local/share/teams-lxd.png" 2>/dev/null || true
   ctuser bash -c "source /usr/local/bin/session-init; \
       export DISPLAY='${DISPLAY}'; \
       export XAUTHORITY=/tmp/xauth/cookie; \
       export PULSE_SERVER='unix:/tmp/pulse-native'; \
       export PIPEWIRE_REMOTE='/tmp/pipewire-0'; \
       microsoft-edge-stable --app='${TEAMS_URL}' \
+          --class=teams-lxd \
           --no-first-run --no-default-browser-check \
           --use-gl=desktop --ignore-gpu-blocklist \
           --enable-gpu-rasterization \
           --disable-dev-shm-usage >/dev/null 2>&1 &" \
     || die "Edge failed to start — open a shell ('./teams-lxd.sh shell') and check the broker/keyring."
+  # Stamp the window's _NET_WM_ICON so the taskbar shows our icon even if the
+  # desktop env hasn't matched the .desktop yet. Runs in its own backgrounded
+  # session (else it gets SIGHUP'd when the launch shell exits, unlike Edge
+  # which self-daemonizes). Best-effort.
+  ( ctuser bash -c "export DISPLAY='${DISPLAY}'; export XAUTHORITY=/tmp/xauth/cookie; \
+      [ -x /usr/local/bin/set-window-icon ] && [ -f /usr/local/share/teams-lxd.png ] && \
+        set-window-icon /usr/local/share/teams-lxd.png teams-lxd 25" >/dev/null 2>&1 & )
   ok "Teams window should be opening on your desktop."
 }
 
@@ -256,13 +320,82 @@ cmd_destroy() {
   ok "Run './teams-lxd.sh setup' to get a fresh container with the same login."
 }
 
+# ----- desktop launcher -----------------------------------------------------
+# Where the .desktop file and our absolute script/icon paths live.
+DESKTOP_FILE="${XDG_DATA_HOME:-$HOME/.local/share}/applications/teams-lxd.desktop"
+SCRIPT_PATH="$SCRIPT_DIR/teams-lxd.sh"
+ICON_PATH="$SCRIPT_DIR/teams-lxd.svg"
+
+# pick_icon: SVG icons don't render in every menu/dock, so prefer a PNG. Try to
+# render one from the bundled SVG with whatever converter is around; fall back to
+# the SVG, then to a stock themed icon name. Echoes the chosen Icon= value.
+pick_icon() {
+  local png="$SCRIPT_DIR/teams-lxd.png"
+  if [ -f "$ICON_PATH" ]; then
+    if [ ! -f "$png" ] || [ "$ICON_PATH" -nt "$png" ]; then
+      if command -v rsvg-convert >/dev/null 2>&1; then
+        rsvg-convert -w 256 -h 256 "$ICON_PATH" -o "$png" 2>/dev/null || true
+      elif command -v inkscape >/dev/null 2>&1; then
+        inkscape "$ICON_PATH" -w 256 -h 256 -o "$png" >/dev/null 2>&1 || true
+      elif command -v convert >/dev/null 2>&1; then
+        convert -background none -resize 256x256 "$ICON_PATH" "$png" 2>/dev/null || true
+      fi
+    fi
+    [ -f "$png" ] && { echo "$png"; return; }
+    echo "$ICON_PATH"; return
+  fi
+  echo "preferences-desktop-remote-desktop"   # stock fallback if the SVG is gone
+}
+
+cmd_install_desktop() {
+  [ -f "$SCRIPT_PATH" ] || die "Can't locate teams-lxd.sh at $SCRIPT_PATH"
+  mkdir -p "$(dirname "$DESKTOP_FILE")"
+  local icon; icon="$(pick_icon)"
+  # Pass through TEAMS_CT so a custom container name keeps working from the menu.
+  local exec_line="$SCRIPT_PATH run"
+  [ "$CT" != "teams-box" ] && exec_line="env TEAMS_CT=$CT $exec_line"
+  cat > "$DESKTOP_FILE" <<EOF
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Microsoft Teams (LXD)
+GenericName=Team collaboration
+Comment=Launch Teams from the isolated, Intune-enrolled LXD container
+Exec=$exec_line
+Icon=$icon
+Terminal=false
+Categories=Network;InstantMessaging;Chat;
+Keywords=teams;microsoft;chat;meeting;lxd;
+StartupNotify=true
+StartupWMClass=teams-lxd
+EOF
+  chmod +x "$DESKTOP_FILE"
+  command -v update-desktop-database >/dev/null 2>&1 \
+      && update-desktop-database "$(dirname "$DESKTOP_FILE")" >/dev/null 2>&1 || true
+  ok "Installed launcher: $DESKTOP_FILE"
+  ok "Look for 'Microsoft Teams (LXD)' in your application menu."
+}
+
+cmd_uninstall_desktop() {
+  if [ -f "$DESKTOP_FILE" ]; then
+    rm -f "$DESKTOP_FILE"
+    command -v update-desktop-database >/dev/null 2>&1 \
+        && update-desktop-database "$(dirname "$DESKTOP_FILE")" >/dev/null 2>&1 || true
+    ok "Removed launcher: $DESKTOP_FILE"
+  else
+    warn "No launcher found at $DESKTOP_FILE"
+  fi
+}
+
 # ----- dispatch -------------------------------------------------------------
 case "${1:-}" in
-  setup)   cmd_setup ;;
-  enroll)  cmd_enroll ;;
-  run)     cmd_run ;;
-  shell)   cmd_shell ;;
-  status)  cmd_status ;;
-  destroy) cmd_destroy ;;
-  *) echo "Usage: $0 {setup|enroll|run|shell|status|destroy}"; exit 1 ;;
+  setup)             cmd_setup ;;
+  enroll)            cmd_enroll ;;
+  run)               cmd_run ;;
+  shell)             cmd_shell ;;
+  status)            cmd_status ;;
+  destroy)           cmd_destroy ;;
+  install-desktop)   cmd_install_desktop ;;
+  uninstall-desktop) cmd_uninstall_desktop ;;
+  *) echo "Usage: $0 {setup|enroll|run|shell|status|destroy|install-desktop|uninstall-desktop}"; exit 1 ;;
 esac

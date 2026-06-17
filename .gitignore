@@ -1,3 +1,6 @@
 # Persistent container home (Edge profile, gnome-keyring, Intune device keys).
 # Contains your work session and enrolment secrets — never commit it.
 data/
+
+# Icon rendered from teams-lxd.svg at install-desktop time.
+teams-lxd.png

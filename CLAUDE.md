@@ -15,7 +15,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ./teams-lxd.sh shell    # drop into a root shell in the container
 ./teams-lxd.sh status   # show container + enrollment state
 ./teams-lxd.sh destroy  # delete container and all enrollment data
+./teams-lxd.sh install-desktop    # write ~/.local/share/applications/teams-lxd.desktop launcher
+./teams-lxd.sh uninstall-desktop  # remove that launcher
 ```
+
+The desktop launcher (`cmd_install_desktop`) writes a `.desktop` file with **absolute** paths to
+`teams-lxd.sh run` and an icon, so the repo must not be moved after install (re-run `install-desktop`
+if it is). It passes through a non-default `TEAMS_CT` via `env`. `pick_icon()` renders the bundled
+`teams-lxd.svg` to `teams-lxd.png` (256×256, via rsvg-convert/inkscape/convert) for menu/dock
+compatibility, falling back to the SVG then a stock themed icon name; the PNG is git-ignored.
 
 Configuration via env vars:
 - `TEAMS_CT` — container name (default: `teams-box`)
@@ -34,6 +42,10 @@ The script is structured as `cmd_<subcommand>()` functions dispatched from a `ca
 **Audio:** PulseAudio/PipeWire passthrough via an LXD proxy device (`/tmp/pulse-native` inside container → host socket). Best-effort; setup continues without it.
 
 **Container helpers:** `ctexec()` runs commands as root in the container; `ctuser()` runs as the `ubuntu` user.
+
+**Window identity / single-instance:** Edge is launched with `--class=teams-lxd`, so the window's `WM_CLASS` matches `StartupWMClass=teams-lxd` in the `.desktop` file. `raise_if_open()` (uses `xdotool`) focuses an existing `teams-lxd` window instead of launching a second one. `ensure_running()` starts the container first if it's stopped (polls readiness, no fixed sleep).
+
+**Taskbar icon:** GNOME's `StartupWMClass` matching can lag a freshly-installed `.desktop` (often needs a relogin on Wayland). To make the icon appear reliably, `set-window-icon.py` (pushed into the container, run after launch via python3-xlib + Pillow) stamps `_NET_WM_ICON` directly on the Teams window. It runs in its own backgrounded session because — unlike Edge, which self-daemonizes — it would otherwise be SIGHUP'd when the launch shell exits. **Auth subtlety:** `prepare_xauth()` writes two cookie entries: a `FamilyWild` (`ffff`) one (Edge/xcb accept it) and a `FamilyLocal` one keyed to the container hostname (`$CT`), which python-xlib's stricter xauth lookup requires for a local `:0` connection.
 
 ## Prerequisites
 
