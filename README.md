@@ -31,20 +31,22 @@ Six subcommands. You run `setup` and `enroll` once; after that it's just `run`.
 setup  →  enroll  →  run  ↺  run … run …
 ```
 
-| Command | What it does |
-| --- | --- |
-| `./teams-lxd.sh setup` | One-time. Creates the container, maps your UID into it, attaches devices and installs Edge + the Intune broker. |
-| `./teams-lxd.sh enroll` | Opens the Company Portal. Sign in with your work account and finish enrolment — inside the box. |
-| `./teams-lxd.sh run` | Launches Teams in Edge on your desktop, with audio, mic, camera and GPU wired through. |
-| `./teams-lxd.sh shell` | Drops you into a root shell in the container for poking around or debugging. |
-| `./teams-lxd.sh status` | Shows container state and whether the identity broker service is alive. |
-| `./teams-lxd.sh destroy` | Removes the running container. Your enrolled identity and login persist in `data/`, so you can rebuild and skip re-enrolling — delete `data/` too to erase it entirely. |
+```bash
+./teams-lxd.sh setup     # one-time: create the container, map your UID, attach devices, install Edge + Intune broker
+./teams-lxd.sh enroll    # interactive: open the Company Portal, sign in with your work account, finish enrolment
+./teams-lxd.sh run       # launch Teams in Edge on your desktop (audio, mic, camera and GPU wired through)
+./teams-lxd.sh shell     # drop into a root shell in the container for poking around / debugging
+./teams-lxd.sh status    # show container state and whether the identity broker service is alive
+./teams-lxd.sh destroy   # remove the container; your login persists in data/ (delete data/ to erase it entirely)
+```
 
 Configuration via env vars:
 
-- `TEAMS_CT` — container name (default: `teams-box`)
-- `TEAMS_KEYRING_PASS` — gnome-keyring unlock passphrase (default: `teams-sandbox`)
-- `TEAMS_DATA` — persistent data directory (default: `./data`)
+```bash
+export TEAMS_CT=teams-box            # container name (default: teams-box)
+export TEAMS_KEYRING_PASS=…          # gnome-keyring unlock passphrase — SET THIS (see Security caveats)
+export TEAMS_DATA=./data             # persistent data directory (default: ./data)
+```
 
 ---
 
@@ -128,6 +130,24 @@ than by loosening permissions on the host.
 | **persistence** | `data/home` bind-mounted over `/home/ubuntu` | Rebuild the box anytime without re-enrolling or logging back in. |
 
 ---
+
+## Security caveats
+
+> [!WARNING]
+> This is a convenience tool, not a hardened security product. Be aware of the following before
+> trusting it with work credentials:
+>
+> - **The keyring passphrase defaults to a weak, public value (`teams-sandbox`).** It unlocks the
+>   gnome-keyring that holds your Intune **device-bound credentials**. **Always set
+>   `TEAMS_KEYRING_PASS` to a strong secret** before `setup`/`enroll`.
+> - **Your enrolment is persisted unencrypted in `data/`.** The keyring and Edge profile live on
+>   your host disk in cleartext. Anyone who reads `data/` (backups, file sync, another local user,
+>   a stolen disk) can unlock and reuse your enrolled identity. Protect that directory — or run
+>   `destroy` *and* delete `data/` when you're done. It is `.gitignore`d so it won't be committed.
+> - **The passphrase is written in cleartext** into a helper script (`/usr/local/bin/session-init`)
+>   inside the container; any process in the container can read it.
+> - **`$DISPLAY` is interpolated into a shell command.** Only run this from a session where you
+>   trust the value of `$DISPLAY` (i.e. your own desktop).
 
 ## Prerequisites
 

@@ -26,6 +26,7 @@ KEYRING_PASS="${TEAMS_KEYRING_PASS:-teams-sandbox}"  # unlock pass for gnome-key
 TEAMS_URL="https://teams.microsoft.com"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DATA_DIR="${TEAMS_DATA:-$SCRIPT_DIR/data}"  # persisted across destroy/recreate
+XAUTH_DIR="$DATA_DIR/xauth"          # host dir bind-mounted to /tmp/xauth in the CT
 
 # ----- pretty logging -------------------------------------------------------
 c_blue='\033[1;34m'; c_grn='\033[1;32m'; c_yel='\033[1;33m'; c_red='\033[1;31m'; c_off='\033[0m'
@@ -36,6 +37,22 @@ die()  { echo -e "${c_red}  x ${c_off} $*" >&2; exit 1; }
 
 ctexec() { lxc exec "$CT" -- "$@"; }                 # run as root in container
 ctuser() { lxc exec "$CT" -- sudo -u ubuntu -i "$@"; }  # run as 'ubuntu'
+
+# prepare_xauth: derive a hostname-agnostic X11 auth cookie into the bind-mounted
+# xauth dir so GUI apps in the container authenticate via a per-display cookie —
+# WITHOUT weakening host access control. This replaces 'xhost +local:', which
+# disabled X11 access control for every local process on the host.
+prepare_xauth() {
+  command -v xauth >/dev/null 2>&1 || { warn "xauth not found on host — GUI auth may fail"; return 0; }
+  mkdir -p "$XAUTH_DIR"
+  local ck="$XAUTH_DIR/cookie"
+  rm -f "$ck"; : > "$ck"
+  # Rewrite the cookie's address family to FamilyWild ('ffff') so it matches the
+  # container's (different) hostname when connecting over the shared X socket.
+  if ! xauth nlist "$DISPLAY" 2>/dev/null | sed -e 's/^..../ffff/' | xauth -f "$ck" nmerge - 2>/dev/null; then
+    warn "could not derive an X cookie for $DISPLAY — the GUI window may not appear"
+  fi
+}
 
 # ----- preflight ------------------------------------------------------------
 # preflight: used only by setup (container may not exist yet).
@@ -87,6 +104,10 @@ cmd_setup() {
   log "Attaching host devices (X11 / GPU / audio / camera)..."
   lxc config device add "$CT" x11 disk \
       source=/tmp/.X11-unix path=/tmp/.X11-unix 2>/dev/null || true
+  # X11 auth cookie dir (cookie-based auth instead of insecure 'xhost +local:').
+  mkdir -p "$XAUTH_DIR"
+  lxc config device add "$CT" xauth disk \
+      source="$XAUTH_DIR" path=/tmp/xauth 2>/dev/null || true
   lxc config device add "$CT" gpu gpu 2>/dev/null || warn "no GPU device added (software rendering will be used)"
   # Audio: bind-mount the host audio sockets to STABLE paths under /tmp.
   # Two non-obvious constraints drove this design:
@@ -189,10 +210,10 @@ cmd_enroll() {
   # mount (and survives destroy), even if setup was run before this dir existed.
   mkdir -p "$DATA_DIR/home"
   log "Opening the Company Portal. Sign in with your work account and complete enrollment."
-  warn "If the window doesn't appear, run 'xhost +local:' on the host and retry."
-  xhost +local: >/dev/null 2>&1 || true
+  prepare_xauth
   ctuser bash -c "source /usr/local/bin/session-init; \
       export DISPLAY='${DISPLAY}'; \
+      export XAUTHORITY=/tmp/xauth/cookie; \
       intune-portal" || warn "Company Portal exited."
   echo
   ok "When the portal shows the device as compliant, run:  ./teams-lxd.sh run"
@@ -202,9 +223,10 @@ cmd_enroll() {
 cmd_run() {
   need_ct
   log "Launching Teams in Edge..."
-  xhost +local: >/dev/null 2>&1 || true
+  prepare_xauth
   ctuser bash -c "source /usr/local/bin/session-init; \
       export DISPLAY='${DISPLAY}'; \
+      export XAUTHORITY=/tmp/xauth/cookie; \
       export PULSE_SERVER='unix:/tmp/pulse-native'; \
       export PIPEWIRE_REMOTE='/tmp/pipewire-0'; \
       microsoft-edge-stable --app='${TEAMS_URL}' \
@@ -214,7 +236,6 @@ cmd_run() {
           --disable-dev-shm-usage >/dev/null 2>&1 &" \
     || die "Edge failed to start — open a shell ('./teams-lxd.sh shell') and check the broker/keyring."
   ok "Teams window should be opening on your desktop."
-  warn "Security note: 'xhost +local:' was enabled. Revert with 'xhost -local:' when done."
 }
 
 # ----- helpers --------------------------------------------------------------

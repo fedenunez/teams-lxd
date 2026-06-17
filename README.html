@@ -99,6 +99,14 @@
   a{color:var(--host)}
   .note{font-size:13px;color:var(--muted);margin-top:14px}
   .kbd{background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:2px 7px;font-size:13px}
+  /* security caveats callout */
+  .warn-box{background:linear-gradient(180deg,rgba(255,93,108,.08),rgba(255,93,108,.02));
+    border:1px solid rgba(255,93,108,.45);border-left:4px solid var(--danger);border-radius:14px;padding:22px 24px}
+  .warn-box h3{margin:0 0 14px;color:var(--danger);font-size:17px;display:flex;align-items:center;gap:9px}
+  .warn-box ul{margin:0;padding-left:20px} .warn-box li{margin:10px 0;color:#e8d2d6}
+  .warn-box li b{color:#ffd0d5} .warn-box code{background:#2a1820;border:1px solid rgba(255,93,108,.3);border-radius:5px;padding:1px 6px;font-size:13px}
+  .warn-box .good{margin:16px 0 0;padding-top:14px;border-top:1px solid rgba(255,93,108,.25);color:#bfe9d2;font-size:14px}
+  .warn-box .good b{color:var(--ct)}
 </style>
 </head>
 <body>
@@ -330,6 +338,34 @@
           <td class="muted">Rebuild the box anytime without re-enrolling or logging back in.</td></tr>
       </tbody>
     </table>
+  </section>
+
+  <!-- SECURITY -->
+  <section class="reveal">
+    <h2><span class="num">06</span>Security caveats</h2>
+    <p class="lead">This is a convenience tool, not a hardened security product. Know these limits
+      before trusting it with work credentials.</p>
+    <div class="warn-box">
+      <h3>
+        <svg class="ic" viewBox="0 0 24 24" fill="none"><path d="M12 3 L22 20 H2 Z" stroke="#ff5d6c" stroke-width="2" stroke-linejoin="round"/><path d="M12 10v5" stroke="#ff5d6c" stroke-width="2.2" stroke-linecap="round"/><circle cx="12" cy="17.5" r="1.2" fill="#ff5d6c"/></svg>
+        Read before relying on it
+      </h3>
+      <ul>
+        <li><b>The keyring passphrase defaults to a weak, public value</b> (<code>teams-sandbox</code>).
+          It unlocks the gnome-keyring holding your Intune <b>device-bound credentials</b>. Always set
+          <code>TEAMS_KEYRING_PASS</code> to a strong secret before <code>setup</code>/<code>enroll</code>.</li>
+        <li><b>Your enrolment is persisted unencrypted in <code>data/</code></b> — keyring and Edge
+          profile sit on your host disk in cleartext. Anyone who reads it (backups, file sync, another
+          local user, a stolen disk) can reuse your enrolled identity. Protect that directory, or
+          <code>destroy</code> <i>and</i> delete <code>data/</code> when done. It is <code>.gitignore</code>d
+          so it won't be committed.</li>
+        <li><b>The passphrase is written in cleartext</b> into a helper script
+          (<code>/usr/local/bin/session-init</code>) inside the container; any process in the container
+          can read it.</li>
+        <li><b><code>$DISPLAY</code> is interpolated into a shell command.</b> Only run this from a
+          session where you trust the value of <code>$DISPLAY</code> (your own desktop).</li>
+      </ul>
+    </div>
   </section>
 
 </main>
