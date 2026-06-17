@@ -239,6 +239,7 @@ than by loosening permissions on the host.
 | **camera** | `unix-char` device with `gid=44 mode=0660` | Default node is `root:root` → "device not found". Group `video` lets `ubuntu` open it. |
 | **GPU** | `gpu` device + `ubuntu` in `render,video` | Without the groups `/dev/dri` is denied and Edge crawls on software rendering. |
 | **persistence** | `data/home` bind-mounted over `/home/ubuntu` | Rebuild the box anytime without re-enrolling or logging back in. |
+| **timezone** | `/etc/localtime` + `/etc/timezone` bind-mounted read-only | Container defaults to UTC → Teams shows meeting/message times in the wrong zone. |
 
 ---
 

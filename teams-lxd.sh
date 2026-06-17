@@ -168,6 +168,13 @@ cmd_setup() {
         gid=44 mode=0660 2>/dev/null && found_cam=1 || true
   done
   [ "$found_cam" -eq 1 ] || warn "no /dev/video* devices found — camera will not work"
+  # Timezone: bind-mount the host's tz files (read-only) so the container — and
+  # therefore Teams meeting/message times — uses the same timezone as your host,
+  # and stays in sync if you ever change it. (source resolves the symlink target.)
+  lxc config device add "$CT" localtime disk \
+      source=/etc/localtime path=/etc/localtime readonly=true 2>/dev/null || true
+  [ -f /etc/timezone ] && lxc config device add "$CT" timezone disk \
+      source=/etc/timezone path=/etc/timezone readonly=true 2>/dev/null || true
   ok "devices attached"
 
   # Provision packages inside the container.

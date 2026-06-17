@@ -339,6 +339,8 @@
           <td class="muted">Without the groups <code>/dev/dri</code> is denied and Edge crawls on software rendering.</td></tr>
         <tr><td>persistence</td><td><code>data/home</code> bind-mounted over <code>/home/ubuntu</code></td>
           <td class="muted">Rebuild the box anytime without re-enrolling or logging back in.</td></tr>
+        <tr><td>timezone</td><td><code>/etc/localtime</code> + <code>/etc/timezone</code> bind-mounted read-only</td>
+          <td class="muted">Container defaults to UTC → Teams would show meeting/message times in the wrong zone.</td></tr>
       </tbody>
     </table>
   </section>

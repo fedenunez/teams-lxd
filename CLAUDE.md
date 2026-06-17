@@ -39,7 +39,9 @@ The script is structured as `cmd_<subcommand>()` functions dispatched from a `ca
 
 **Gnome-keyring / session persistence:** The identity broker stores device-bound keys in gnome-keyring. A `/usr/local/bin/session-init` helper script is installed in the container to start dbus and unlock the keyring non-interactively on each `run`/`enroll`. `loginctl enable-linger ubuntu` keeps the systemd user session alive between launches. **If enrollment silently fails, the keyring unlock is the first place to debug.**
 
-**Audio:** PulseAudio/PipeWire passthrough via an LXD proxy device (`/tmp/pulse-native` inside container → host socket). Best-effort; setup continues without it.
+**Audio:** PulseAudio + PipeWire passthrough by bind-mounting the host sockets to stable `/tmp` paths (`/tmp/pulse-native`, `/tmp/pipewire-0`) — *not* an LXD proxy (the proxy connects as root and PipeWire refuses a non-owner peer; a bind-mount preserves credentials via idmap) and *not* under `/run/user/1000` (logind's tmpfs would shadow it). `cmd_run` points the clients at those paths. Best-effort; setup continues without it.
+
+**Timezone:** `/etc/localtime` and `/etc/timezone` are bind-mounted read-only from the host so the container (and therefore Teams meeting/message times) matches the host timezone and stays in sync.
 
 **Container helpers:** `ctexec()` runs commands as root in the container; `ctuser()` runs as the `ubuntu` user.
 
