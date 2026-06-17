@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="author" content="fedenunez">
+<title>teams-lxd — Company Teams, sandboxed away from your laptop</title>
+<style>
+  :root{
+    --bg:#0c1018; --panel:#141b29; --panel2:#1b2433; --ink:#e8eef7; --muted:#9fb0c8;
+    --host:#3aa0ff; --ct:#36d399; --ms:#f4a13b; --danger:#ff5d6c; --line:#26344a;
+    --accent:#7c5cff;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0; font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    background:radial-gradient(1200px 600px at 70% -10%,#1a2440 0%,var(--bg) 55%) no-repeat,var(--bg);
+    color:var(--ink); -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:980px;margin:0 auto;padding:0 22px}
+  code,kbd{font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace}
+
+  /* ---------- hero ---------- */
+  header.hero{padding:90px 0 60px;text-align:center;position:relative;overflow:hidden}
+  .badge{display:inline-block;font-size:13px;letter-spacing:.12em;text-transform:uppercase;
+    color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:6px 14px;margin-bottom:22px}
+  h1.title{font-size:clamp(38px,7vw,68px);line-height:1.02;margin:0 0 14px;font-weight:800;
+    background:linear-gradient(90deg,var(--host),var(--ct) 55%,var(--accent));
+    -webkit-background-clip:text;background-clip:text;color:transparent}
+  .tag{font-size:clamp(17px,2.5vw,21px);color:var(--muted);max-width:680px;margin:0 auto 34px}
+  .tag b{color:var(--ink)}
+
+  /* floating shield in hero */
+  .shield{width:96px;height:110px;margin:0 auto 26px;position:relative;animation:bob 4s ease-in-out infinite}
+  @keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-10px)}}
+  .shield svg{filter:drop-shadow(0 8px 24px rgba(54,211,153,.35))}
+  .ring{position:absolute;inset:-26px;border:2px dashed var(--ct);border-radius:50%;opacity:.35;
+    animation:spin 14s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+
+  /* ---------- layout bits ---------- */
+  section{padding:46px 0;border-top:1px solid var(--line)}
+  h2{font-size:30px;margin:0 0 10px;font-weight:800}
+  h2 .num{color:var(--accent);font-variant-numeric:tabular-nums;margin-right:10px;opacity:.7}
+  .lead{color:var(--muted);margin:0 0 28px;max-width:720px}
+  .reveal{opacity:0;transform:translateY(18px);transition:.7s cubic-bezier(.2,.7,.2,1)}
+  .reveal.in{opacity:1;transform:none}
+
+  /* command cards */
+  .cmds{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px}
+  .card{position:relative;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px 18px 16px;
+    transition:transform .25s,border-color .25s}
+  .card:hover{transform:translateY(-4px);border-color:var(--accent)}
+  .card .c{font-family:ui-monospace,monospace;font-size:15px;color:var(--ct);font-weight:600;padding-right:34px}
+  .card .c .sub{color:var(--host)}
+  .card p{margin:8px 0 0;font-size:14.5px;color:var(--muted)}
+  .copy{position:absolute;top:12px;right:12px;width:30px;height:30px;display:grid;place-items:center;
+    background:var(--panel2);border:1px solid var(--line);border-radius:8px;color:var(--muted);
+    cursor:pointer;transition:.18s;padding:0}
+  .copy:hover{color:var(--ink);border-color:var(--accent);background:#222d40}
+  .copy svg{width:15px;height:15px;display:block}
+  .copy.done{color:var(--ct);border-color:var(--ct)}
+  .copy .tick{display:none} .copy.done .tick{display:block} .copy.done .clip{display:none}
+  .seq{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 26px;font-family:ui-monospace,monospace;font-size:14px}
+  .seq .step{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:6px 12px}
+  .seq .arr{color:var(--accent)}
+
+  /* ---------- architecture diagram ---------- */
+  .diagram{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:10px}
+  .legend{display:flex;gap:18px;flex-wrap:wrap;justify-content:center;margin:18px 0 0;font-size:13.5px;color:var(--muted)}
+  .legend span{display:inline-flex;align-items:center;gap:7px}
+  .dot{width:11px;height:11px;border-radius:3px;display:inline-block}
+
+  /* marching-dashes flow lines (CSS on SVG) */
+  .flow{stroke-dasharray:6 7;animation:march 1s linear infinite}
+  @keyframes march{to{stroke-dashoffset:-26}}
+  .pkt{animation:none}
+
+  /* ---------- why-safe containment ---------- */
+  .safe-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  @media(max-width:760px){.safe-grid{grid-template-columns:1fr}.safe-cols{flex-direction:column}}
+  .pill{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px}
+  .pill h3{margin:0 0 8px;font-size:18px;display:flex;align-items:center;gap:10px}
+  .pill.ok h3{color:var(--ct)} .pill.no h3{color:var(--danger)}
+  .pill ul{margin:6px 0 0;padding-left:18px;color:var(--muted)} .pill li{margin:5px 0}
+  .ic{width:26px;height:26px;flex:0 0 26px}
+
+  /* passthrough table */
+  table{width:100%;border-collapse:collapse;background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+  th,td{padding:13px 16px;text-align:left;border-bottom:1px solid var(--line);font-size:14.5px;vertical-align:top}
+  th{background:var(--panel2);color:var(--ink);font-weight:700}
+  td:first-child{color:var(--ct);font-family:ui-monospace,monospace;white-space:nowrap}
+  tr:last-child td{border-bottom:none}
+  .muted{color:var(--muted)}
+
+  footer{padding:50px 0 70px;text-align:center;color:var(--muted);font-size:14px}
+  footer b{color:var(--ink)}
+  a{color:var(--host)}
+  .note{font-size:13px;color:var(--muted);margin-top:14px}
+  .kbd{background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:2px 7px;font-size:13px}
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <div class="shield">
+      <div class="ring"></div>
+      <svg width="96" height="110" viewBox="0 0 96 110" fill="none">
+        <path d="M48 4 L88 20 V56 C88 84 70 100 48 106 C26 100 8 84 8 56 V20 Z"
+              fill="#15233a" stroke="#36d399" stroke-width="3"/>
+        <path d="M30 56 l12 12 l24 -26" stroke="#36d399" stroke-width="6" fill="none"
+              stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </div>
+    <div class="badge">teams-lxd.sh · LXD sandbox</div>
+    <h1 class="title">Company Teams,<br>off your real laptop.</h1>
+    <p class="tag">Run Microsoft Teams inside a disposable LXD container that enrols in
+      <b>Intune</b> on your behalf — so Conditional Access is satisfied while your actual
+      machine stays <b>unmanaged and unenrolled</b>: no MDM agent ever runs on it.</p>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <!-- WHAT -->
+  <section class="reveal">
+    <h2><span class="num">01</span>What it is</h2>
+    <p class="lead">Microsoft requires that the device touching Teams be enrolled in Intune and
+      pass a Conditional-Access compliance check. Enrolling your laptop hands your employer an MDM
+      agent with deep reach into your personal machine. <b>teams-lxd</b> moves that burden into a
+      throwaway box: a Ubuntu 24.04 LXD system container is the thing that gets enrolled. Edge runs
+      inside it, but its window paints on your normal desktop through the shared X11 socket — it looks
+      and feels like a local app, while the compliance, the management agent, and the device-bound keys
+      are all sealed inside the container.</p>
+  </section>
+
+  <!-- USE -->
+  <section class="reveal">
+    <h2><span class="num">02</span>How to use it</h2>
+    <p class="lead">Six subcommands. You run <code>setup</code> and <code>enroll</code> once;
+      after that it's just <code>run</code>.</p>
+
+    <div class="seq">
+      <span class="step">setup</span><span class="arr">→</span>
+      <span class="step">enroll</span><span class="arr">→</span>
+      <span class="step">run</span><span class="arr">↺</span>
+      <span class="step" style="opacity:.6">run … run …</span>
+    </div>
+
+    <div class="cmds">
+      <div class="card"><button class="copy" type="button" title="Copy command" aria-label="Copy command"></button>
+        <div class="c">./teams-lxd.sh <span class="sub">setup</span></div>
+        <p>One-time. Creates the container, maps your UID into it, attaches devices and installs Edge + the Intune broker.</p></div>
+      <div class="card"><button class="copy" type="button" title="Copy command" aria-label="Copy command"></button>
+        <div class="c">./teams-lxd.sh <span class="sub">enroll</span></div>
+        <p>Opens the Company Portal. Sign in with your work account and finish enrolment — inside the box.</p></div>
+      <div class="card"><button class="copy" type="button" title="Copy command" aria-label="Copy command"></button>
+        <div class="c">./teams-lxd.sh <span class="sub">run</span></div>
+        <p>Launches Teams in Edge on your desktop, with audio, mic, camera and GPU wired through.</p></div>
+      <div class="card"><button class="copy" type="button" title="Copy command" aria-label="Copy command"></button>
+        <div class="c">./teams-lxd.sh <span class="sub">shell</span></div>
+        <p>Drops you into a root shell in the container for poking around or debugging.</p></div>
+      <div class="card"><button class="copy" type="button" title="Copy command" aria-label="Copy command"></button>
+        <div class="c">./teams-lxd.sh <span class="sub">status</span></div>
+        <p>Shows container state and whether the identity broker service is alive.</p></div>
+      <div class="card"><button class="copy" type="button" title="Copy command" aria-label="Copy command"></button>
+        <div class="c">./teams-lxd.sh <span class="sub">destroy</span></div>
+        <p>Removes the running container. Your enrolled identity and login persist in <code>data/</code>, so you can rebuild and skip re-enrolling — delete <code>data/</code> too to erase it entirely.</p></div>
+    </div>
+    <p class="note">Override the container name with <span class="kbd">TEAMS_CT=…</span> and the keyring
+      passphrase with <span class="kbd">TEAMS_KEYRING_PASS=…</span>.</p>
+  </section>
+
+  <!-- HOW -->
+  <section class="reveal">
+    <h2><span class="num">03</span>How it works</h2>
+    <p class="lead">The container is sealed except for a handful of deliberately punched holes. Edge,
+      audio, video and the GPU live on the host side of those holes; the Intune agent and its keys never
+      leave the box. The dashed lines are the only things crossing the boundary — watch them flow.</p>
+
+    <div class="diagram">
+      <svg viewBox="0 0 940 492" width="100%" role="img" aria-label="Architecture diagram">
+        <defs>
+          <linearGradient id="ghost" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#16223a"/><stop offset="1" stop-color="#10192b"/>
+          </linearGradient>
+          <marker id="ab" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#3aa0ff"/></marker>
+          <marker id="ag" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#36d399"/></marker>
+          <marker id="ap" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#7c5cff"/></marker>
+        </defs>
+
+        <!-- ===== panels ===== -->
+        <rect x="12" y="14" width="420" height="450" rx="16" fill="url(#ghost)" stroke="#26344a"/>
+        <text x="34" y="46" fill="#3aa0ff" font-size="17" font-weight="700">YOUR LAPTOP · host</text>
+        <text x="34" y="68" fill="#9fb0c8" font-size="12.5">unmanaged · no MDM agent · not enrolled</text>
+
+        <rect x="508" y="14" width="420" height="450" rx="16" fill="url(#ghost)" stroke="#36d399"/>
+        <text x="530" y="46" fill="#36d399" font-size="17" font-weight="700">LXD CONTAINER · teams-box</text>
+        <text x="530" y="68" fill="#9fb0c8" font-size="12.5">Ubuntu 24.04 · the “managed device”</text>
+
+        <!-- ===== boundary ===== -->
+        <line x1="470" y1="86" x2="470" y2="452" stroke="#7c5cff" stroke-width="2" stroke-dasharray="2 7" opacity=".65"/>
+        <text x="470" y="484" fill="#7c5cff" font-size="11.5" text-anchor="middle" letter-spacing="1">ISOLATION BOUNDARY</text>
+
+        <!-- ===== lanes: host chip (x112..412) | connector | container chip (x528..828) ===== -->
+        <g font-size="13">
+          <!-- L1 X11 / display  (y=122) -->
+          <rect x="112" y="100" width="300" height="44" rx="9" fill="#11203a" stroke="#3aa0ff"/>
+          <text x="130" y="127" fill="#cfe0ff">🖥  Teams window</text>
+          <rect x="528" y="100" width="300" height="44" rx="9" fill="#16321f" stroke="#3aa0ff"/>
+          <text x="546" y="127" fill="#bff0d6">🌐  Microsoft Edge → Teams</text>
+          <path class="flow" d="M528 122 H412" stroke="#3aa0ff" stroke-width="2.5" fill="none" marker-end="url(#ab)"/>
+          <text x="470" y="114" fill="#9fb0c8" font-size="10.5" text-anchor="middle">display</text>
+
+          <!-- L2 persistent home (y=184) -->
+          <rect x="112" y="162" width="300" height="44" rx="9" fill="#13203a" stroke="#7c5cff"/>
+          <text x="130" y="189" fill="#d9ccff">💾  data/home  <tspan fill="#8b9bb6" font-size="11">(on host)</tspan></text>
+          <rect x="528" y="162" width="300" height="44" rx="9" fill="#1c1633" stroke="#7c5cff"/>
+          <text x="546" y="189" fill="#d9ccff">📁  /home/ubuntu  <tspan fill="#8b9bb6" font-size="11">(persistent)</tspan></text>
+          <path class="flow" d="M412 184 H528" stroke="#7c5cff" stroke-width="2.5" fill="none" marker-end="url(#ap)" style="animation-delay:.1s"/>
+          <text x="470" y="176" fill="#9fb0c8" font-size="10.5" text-anchor="middle">profile</text>
+
+          <!-- L3 audio (y=246) -->
+          <rect x="112" y="224" width="300" height="44" rx="9" fill="#13203a" stroke="#36d399"/>
+          <text x="130" y="251" fill="#cdd9ec">🔊  PipeWire / PulseAudio</text>
+          <rect x="528" y="224" width="300" height="44" rx="9" fill="#16321f" stroke="#36d399"/>
+          <text x="546" y="251" fill="#bff0d6">🎧  Edge audio + mic</text>
+          <path class="flow" d="M412 246 H528" stroke="#36d399" stroke-width="2.5" fill="none" marker-end="url(#ag)" style="animation-delay:.2s"/>
+          <text x="470" y="238" fill="#9fb0c8" font-size="10.5" text-anchor="middle">audio · mic</text>
+
+          <!-- L4 camera (y=308) -->
+          <rect x="112" y="286" width="300" height="44" rx="9" fill="#13203a" stroke="#36d399"/>
+          <text x="130" y="313" fill="#cdd9ec">🎥  /dev/video*</text>
+          <rect x="528" y="286" width="300" height="44" rx="9" fill="#16321f" stroke="#36d399"/>
+          <text x="546" y="313" fill="#bff0d6">📷  camera in Teams</text>
+          <path class="flow" d="M412 308 H528" stroke="#36d399" stroke-width="2.5" fill="none" marker-end="url(#ag)" style="animation-delay:.3s"/>
+          <text x="470" y="300" fill="#9fb0c8" font-size="10.5" text-anchor="middle">camera</text>
+
+          <!-- L5 GPU (y=370) -->
+          <rect x="112" y="348" width="300" height="44" rx="9" fill="#13203a" stroke="#36d399"/>
+          <text x="130" y="375" fill="#cdd9ec">⚡  GPU /dev/dri</text>
+          <rect x="528" y="348" width="300" height="44" rx="9" fill="#16321f" stroke="#36d399"/>
+          <text x="546" y="375" fill="#bff0d6">🖼  hardware rendering</text>
+          <path class="flow" d="M412 370 H528" stroke="#36d399" stroke-width="2.5" fill="none" marker-end="url(#ag)" style="animation-delay:.4s"/>
+          <text x="470" y="362" fill="#9fb0c8" font-size="10.5" text-anchor="middle">GPU</text>
+
+          <!-- L6 Intune containment (y=432) — container only, blocked at boundary -->
+          <rect x="528" y="410" width="300" height="44" rx="9" fill="#33260f" stroke="#f4a13b"/>
+          <text x="546" y="430" fill="#ffd9a6" font-size="12.5">🛡  Intune broker + 🔑 device keys</text>
+          <text x="546" y="447" fill="#c79a63" font-size="11">sealed in the box · never re-emitted</text>
+          <path d="M528 432 H486" stroke="#ff5d6c" stroke-width="2.5" fill="none" stroke-dasharray="5 5" opacity=".7"/>
+          <text x="472" y="437" fill="#ff5d6c" font-size="16" font-weight="700" text-anchor="middle">✕</text>
+          <text x="300" y="436" fill="#ff7d89" font-size="11" text-anchor="middle">blocked — no MDM on host</text>
+        </g>
+      </svg>
+
+      <div class="legend">
+        <span><i class="dot" style="background:#3aa0ff"></i> X11 display</span>
+        <span><i class="dot" style="background:#36d399"></i> audio · camera · GPU</span>
+        <span><i class="dot" style="background:#7c5cff"></i> persistent home</span>
+        <span><i class="dot" style="background:#f4a13b"></i> Intune enrolment (contained)</span>
+        <span><i class="dot" style="background:#ff5d6c"></i> blocked from host</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- WHY SAFE -->
+  <section class="reveal">
+    <h2><span class="num">04</span>Why Intune never touches your laptop</h2>
+    <p class="lead">Conditional Access asks one question: <i>"is the device on a compliant, enrolled
+      machine?"</i> teams-lxd answers <b>yes</b> — about the container. Everything the management plane
+      installs, fingerprints and trusts is created inside <code>teams-box</code>, on the far side of the
+      isolation boundary. No MDM agent ever runs on your host; the only place the enrolment exists on
+      your disk is the container's home directory, which you can wipe whenever you like.</p>
+
+    <div class="safe-grid">
+      <div class="pill ok">
+        <h3>
+          <svg class="ic" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="11" stroke="#36d399" stroke-width="2"/><path d="M7 12l3.5 3.5L17 8" stroke="#36d399" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Stays inside the container
+        </h3>
+        <ul>
+          <li>The Intune / identity-broker agent &amp; daemon</li>
+          <li>Device-bound compliance keys (in gnome-keyring)</li>
+          <li>The enrolled "managed device" record Microsoft sees</li>
+          <li>Edge's profile, cookies and work session</li>
+          <li>Any policy, inventory or remote-wipe reach</li>
+        </ul>
+      </div>
+      <div class="pill no">
+        <h3>
+          <svg class="ic" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="11" stroke="#ff5d6c" stroke-width="2"/><path d="M8 8l8 8M16 8l-8 8" stroke="#ff5d6c" stroke-width="2.2" stroke-linecap="round"/></svg>
+          Never reaches your host
+        </h3>
+        <ul>
+          <li>No MDM agent installed or running on your laptop</li>
+          <li>No compliance scan of your host disk or processes (no agent there)</li>
+          <li>No fingerprint of your <i>real hardware</i> registered with the tenant</li>
+          <li>Your files, browser and other accounts stay private</li>
+          <li>Enrolment lives only in <code>data/</code> — delete it to erase everything</li>
+        </ul>
+      </div>
+    </div>
+
+    <p class="note">The only things that cross the boundary are a display socket, audio/camera/GPU
+      device nodes, and an optional persistent home directory you control — never the management plane.
+      Because your UID is mapped 1:1 into the container, those shared sockets line up by ownership rather
+      than by loosening permissions on the host.</p>
+  </section>
+
+  <!-- PASSTHROUGH -->
+  <section class="reveal">
+    <h2><span class="num">05</span>What's wired through — and the trick that made each work</h2>
+    <p class="lead">The fiddly parts of running a GUI app from a container, and how teams-lxd solves them.</p>
+    <table>
+      <thead><tr><th>Hole</th><th>Mechanism</th><th>The gotcha it avoids</th></tr></thead>
+      <tbody>
+        <tr><td>display</td><td>bind-mount <code>/tmp/.X11-unix</code> + <code>xhost +local:</code></td>
+          <td class="muted">UID mapped 1:1 so the X cookie &amp; socket ownership line up.</td></tr>
+        <tr><td>audio + mic</td><td>bind-mount the Pulse/PipeWire sockets to <code>/tmp</code></td>
+          <td class="muted">A proxy connects as root and PipeWire refuses it; a bind-mount keeps your
+            credentials. Mounted under <code>/tmp</code>, not <code>/run/user</code>, so logind's tmpfs can't shadow it.</td></tr>
+        <tr><td>camera</td><td><code>unix-char</code> device with <code>gid=44 mode=0660</code></td>
+          <td class="muted">Default node is <code>root:root</code> → "device not found". Group <code>video</code> lets <code>ubuntu</code> open it.</td></tr>
+        <tr><td>GPU</td><td><code>gpu</code> device + <code>ubuntu</code> in <code>render,video</code></td>
+          <td class="muted">Without the groups <code>/dev/dri</code> is denied and Edge crawls on software rendering.</td></tr>
+        <tr><td>persistence</td><td><code>data/home</code> bind-mounted over <code>/home/ubuntu</code></td>
+          <td class="muted">Rebuild the box anytime without re-enrolling or logging back in.</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <p>Built with care by <b>fedenunez</b> · <code>teams-lxd.sh</code></p>
+    <p class="note">Requires LXD and an X11 / Xwayland session. Tested on Ubuntu 24.04 (noble) containers.</p>
+  </div>
+</footer>
+
+<script>
+  // reveal-on-scroll
+  const io = new IntersectionObserver((es)=>{
+    es.forEach(e=>{ if(e.isIntersecting){ e.target.classList.add('in'); io.unobserve(e.target);} });
+  },{threshold:.16});
+  document.querySelectorAll('.reveal').forEach(el=>io.observe(el));
+
+  // copy-to-clipboard on command cards
+  const CLIP = '<svg class="clip" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>'
+            + '<svg class="tick" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"/></svg>';
+  document.querySelectorAll('.copy').forEach(btn=>{
+    btn.innerHTML = CLIP;
+    btn.addEventListener('click', async ()=>{
+      const cmd = btn.parentElement.querySelector('.c').textContent.trim();
+      try { await navigator.clipboard.writeText(cmd); }
+      catch(e){ const t=document.createElement('textarea'); t.value=cmd; document.body.appendChild(t); t.select(); document.execCommand('copy'); t.remove(); }
+      btn.classList.add('done'); btn.title = 'Copied!';
+      clearTimeout(btn._t);
+      btn._t = setTimeout(()=>{ btn.classList.remove('done'); btn.title='Copy command'; }, 1400);
+    });
+  });
+</script>
+</body>
+</html>
